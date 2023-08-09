@@ -1,0 +1,62 @@
+---
+- name: DNS Entry Handling
+  hosts: pi
+  become: true
+  gather_facts: false
+
+  tasks:
+
+    block:
+      - name: Backup config files
+        ansible.builtin.copy: 
+          src: /etc/pihole/custom.list
+          dest: /etc/pihole/backup_custom.list
+        check_mode: true
+
+    rescue:
+      - name: Warn that backup failed
+        ansible.builtin.debug:
+          msg: "Backup Failed! Templates means this should be safe to continue though! We will proceed to muck-aboot and found out."
+
+    - name: Update CNAME from template
+      ansible.builtin.template:
+        src: /raspberrypi_automation/cname_record_template.j2
+        dest: /etc/dnsmasq.d/05-pihole-custom-cname.conf
+      check_mode: true
+      register: cname_update
+
+    - name: Update A Record from template
+      ansible.builtin.template:
+        src: /raspberrypi_automation/a_record_template.j2
+        dest: /etc/pihole/custom.list
+      check_mode: true
+      register: a_update
+
+    when: (cname_update is changed) or (a_update is changed)
+    block:
+
+      - name: Restart DNS
+        command: pihole restartdns
+ 
+      - name: Verify Pihole Status
+        command: pihole status
+        register: status
+   
+      - name: Print Result
+        debug:
+          var: status.stdout
+    
+    rescue:
+      - name: Warn restart failed
+        ansible.builtin.debug:
+          msg: "DNS Restart Failed! Changes will not take affect! Please manually restart DNS w/ <pihole restardns>"
+
+    - name: Final Status Success!
+      ansible.builtin.debug:
+        msg: "DNS Successfully Updated!"
+      when: status is changed
+
+    - name: No Changes!
+      ansible.builtin.debug:
+        msg: "No changes were made."
+      when: status is skipped
